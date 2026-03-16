@@ -26,18 +26,20 @@ import datetime as dt
 class AutoTradingAgent:
     """Automated trading agent that follows algo_engine signals"""
     
-    def __init__(self, portfolio, tickers, check_interval=300, position_size=1):
+    def __init__(self, portfolio, tickers, check_interval=300, position_size=1, save_callback=None):
         """
         Args:
             portfolio: PaperTradingPortfolio instance
             tickers: List of tickers to monitor
             check_interval: Seconds between signal checks (default 5 min)
             position_size: Number of contracts per position
+            save_callback: Optional function to call after trades (for auto-save)
         """
         self.portfolio = portfolio
         self.tickers = tickers if isinstance(tickers, list) else [tickers]
         self.check_interval = check_interval
         self.position_size = position_size
+        self.save_callback = save_callback
         self.is_running = False
         self.last_signals = {}  # Track last signal per ticker to avoid duplicates
         self.log = []
@@ -189,6 +191,13 @@ class AutoTradingAgent:
                 'timestamp': dt.datetime.now()
             }
             
+            # Auto-save if callback provided
+            if self.save_callback:
+                try:
+                    self.save_callback()
+                except Exception as e:
+                    self.log_message(f"Warning: Auto-save failed - {str(e)}")
+            
             return True, result
         else:
             self.log_message(f"{ticker}: Failed to open position - {result}")
@@ -217,6 +226,13 @@ class AutoTradingAgent:
                 # Close position at entry price (simplified)
                 self.portfolio.close_position(pos, pos.entry_price)
                 self.log_message(f"⚠️ CLOSED {pos.ticker} {pos.option_type} - Near expiration")
+                
+                # Auto-save if callback provided
+                if self.save_callback:
+                    try:
+                        self.save_callback()
+                    except Exception as e:
+                        self.log_message(f"Warning: Auto-save failed - {str(e)}")
     
     def run_cycle(self):
         """Run one trading cycle - check all tickers"""

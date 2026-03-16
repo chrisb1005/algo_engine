@@ -3,6 +3,8 @@ import sys
 import os
 import threading
 import time
+import json
+from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -10,6 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.paper_trader import PaperTradingPortfolio
 from core.auto_agent import AutoTradingAgent
 import pandas as pd
+
+# Default portfolio save path
+DEFAULT_PORTFOLIO_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    'portfolio_state.json'
+)
 
 st.set_page_config(page_title="Paper Trading Agent", page_icon="🤖", layout="wide")
 
@@ -29,6 +37,50 @@ if 'agent_running' not in st.session_state:
     st.session_state['agent_running'] = False
 if 'agent_thread' not in st.session_state:
     st.session_state['agent_thread'] = None
+if 'tickers' not in st.session_state:
+    st.session_state['tickers'] = []
+if 'check_interval' not in st.session_state:
+    st.session_state['check_interval'] = 300
+if 'portfolio_loaded' not in st.session_state:
+    st.session_state['portfolio_loaded'] = False
+
+# Auto-load portfolio from saved state (only once per session)
+if not st.session_state['portfolio_loaded'] and os.path.exists(DEFAULT_PORTFOLIO_PATH):
+    try:
+        portfolio = PaperTradingPortfolio.load_from_file(DEFAULT_PORTFOLIO_PATH)
+        
+        # Try to load agent config if exists
+        config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                st.session_state['tickers'] = config.get('tickers', [])
+                st.session_state['check_interval'] = config.get('check_interval', 300)
+                position_size = config.get('position_size', 1)
+                
+                # Recreate agent with loaded config
+                if st.session_state['tickers']:
+                    # Define save callback
+                    def save_portfolio():
+                        try:
+                            portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
+                        except Exception as e:
+                            print(f"Auto-save error: {e}")
+                    
+                    agent = AutoTradingAgent(
+                        portfolio=portfolio,
+                        tickers=st.session_state['tickers'],
+                        check_interval=st.session_state['check_interval'],
+                        position_size=position_size,
+                        save_callback=save_portfolio
+                    )
+                    st.session_state['agent'] = agent
+        
+        st.session_state['portfolio'] = portfolio
+        st.session_state['portfolio_loaded'] = True
+        st.success(f"✅ Portfolio loaded from saved state! ({os.path.basename(DEFAULT_PORTFOLIO_PATH)})")
+    except Exception as e:
+        st.warning(f"⚠️ Could not load saved portfolio: {str(e)}")
 
 # Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Setup", "📊 Portfolio", "📈 Positions", "📜 Trade Log"])
@@ -118,27 +170,59 @@ with tab1:
                     max_positions=max_positions
                 )
                 
+                # Define save callback
+                def save_portfolio():
+                    try:
+                        portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
+                    except Exception as e:
+                        print(f"Auto-save error: {e}")
+                
                 # Create agent
                 agent = AutoTradingAgent(
                     portfolio=portfolio,
                     tickers=tickers,
                     check_interval=check_interval,
-                    position_size=contracts_per_trade
+                    position_size=contracts_per_trade,
+                    save_callback=save_portfolio
                 )
                 
                 st.session_state['portfolio'] = portfolio
                 st.session_state['agent'] = agent
                 st.session_state['tickers'] = tickers
+                st.session_state['check_interval'] = check_interval
                 
-                st.success(f"✅ Portfolio created with ${starting_cash:,.0f}")
+                # Save portfolio and config immediately
+                try:
+                    portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
+                    # Save agent config separately
+                    config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
+                    with open(config_path, 'w') as f:
+                        json.dump({
+                            'tickers': tickers,
+                            'check_interval': check_interval,
+                            'position_size': contracts_per_trade
+                        }, f)
+                    st.success(f"✅ Portfolio created and saved with ${starting_cash:,.0f}")
+                except Exception as e:
+                    st.success(f"✅ Portfolio created with ${starting_cash:,.0f}")
+                    st.warning(f"⚠️ Could not auto-save: {str(e)}")
+                
                 st.rerun()
     
     with col2:
         if st.button("🗑️ Reset Portfolio", disabled=st.session_state['portfolio'] is None or st.session_state['agent_running']):
+            # Delete saved files
+            if os.path.exists(DEFAULT_PORTFOLIO_PATH):
+                os.remove(DEFAULT_PORTFOLIO_PATH)
+            config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            
             st.session_state['portfolio'] = None
             st.session_state['agent'] = None
             st.session_state['agent_running'] = False
-            st.success("Portfolio reset")
+            st.session_state['portfolio_loaded'] = False
+            st.success("Portfolio reset and saved state cleared")
             st.rerun()
     
     with col3:
@@ -157,6 +241,37 @@ with tab1:
             st.session_state['agent_running'] = False
             st.warning("Agent stopped")
             st.rerun()
+    
+    # Manual save/load section
+    if st.session_state['portfolio']:
+        st.markdown("---")
+        st.markdown("**💾 Save/Load**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("💾 Save Portfolio", help="Manually save current portfolio state"):
+                try:
+                    portfolio = st.session_state['portfolio']
+                    portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
+                    # Save agent config
+                    config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
+                    with open(config_path, 'w') as f:
+                        json.dump({
+                            'tickers': st.session_state.get('tickers', []),
+                            'check_interval': st.session_state.get('check_interval', 300),
+                            'position_size': st.session_state['agent'].position_size if st.session_state['agent'] else 1
+                        }, f)
+                    st.success(f"✅ Portfolio saved to {os.path.basename(DEFAULT_PORTFOLIO_PATH)}")
+                except Exception as e:
+                    st.error(f"❌ Save failed: {str(e)}")
+        
+        with col2:
+            st.caption(f"📁 {os.path.basename(DEFAULT_PORTFOLIO_PATH)}")
+            if os.path.exists(DEFAULT_PORTFOLIO_PATH):
+                file_time = os.path.getmtime(DEFAULT_PORTFOLIO_PATH)
+                from datetime import datetime
+                st.caption(f"Last saved: {datetime.fromtimestamp(file_time).strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Current status
     if st.session_state['portfolio']:
@@ -341,6 +456,11 @@ with tab4:
                 if st.button("🔄 Force Check Now"):
                     with st.spinner("Running cycle..."):
                         agent.run_cycle()
+                        # Auto-save after cycle
+                        try:
+                            st.session_state['portfolio'].save_to_file(DEFAULT_PORTFOLIO_PATH)
+                        except:
+                            pass
                         st.rerun()
         
         # Display log
@@ -356,4 +476,9 @@ with tab4:
             if st.button("🔧 Run Test Cycle (Manual)", help="Run one check cycle manually"):
                 with st.spinner("Running test cycle..."):
                     agent.run_cycle()
+                    # Auto-save after cycle
+                    try:
+                        st.session_state['portfolio'].save_to_file(DEFAULT_PORTFOLIO_PATH)
+                    except:
+                        pass
                     st.rerun()
