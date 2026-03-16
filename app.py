@@ -39,6 +39,12 @@ for options trading strategies.
 - Comprehensive due diligence reports with charts
 - Risk assessment and opportunity identification
 
+**🤖 Paper Trading Agent** - Automated trading with virtual money
+- Set up portfolio with fake money ($1K-$1M)
+- Agent monitors stocks and executes based on algo_engine signals
+- Track positions, P&L, and trade history in real-time
+- Test strategies without risk before going live
+
 **⚡ Live Trading** - Execute trades automatically (Coming Soon)
 - Integration with Alpaca and Tradier APIs
 - Automated order execution based on signals
@@ -50,10 +56,16 @@ for options trading strategies.
 
 Use the **sidebar** on the left to navigate between different modules.
 
-**Try it out:**
+**For Analysis:**
 1. Click on **🔍 Algo Engine** in the sidebar
 2. Enter a ticker symbol (e.g., AAPL, MSFT, TSLA)
 3. Click Analyze to get trading signals
+
+**For Paper Trading:**
+1. Click on **🤖 Paper Trading Agent** in the sidebar
+2. Configure your virtual portfolio ($10K recommended)
+3. Add tickers to monitor and start the agent
+4. Watch it trade automatically based on signals!
 
 ---
 
@@ -73,4 +85,5 @@ with st.sidebar:
     st.markdown("🟢 Data Feed: Active")
     st.markdown("🟢 Indicators: Active")
     st.markdown("🟢 Signals: Active")
-    st.markdown("🔴 Live Trading: Disabled")
+    st.markdown("� Paper Trading: Active")
+    st.markdown("�🔴 Live Trading: Disabled")
