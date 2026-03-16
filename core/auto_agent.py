@@ -16,8 +16,9 @@ from core.data import load_history, get_current_price
 from core.indicators import compute_indicators
 from core.signals import generate_signal
 from core.strategies import decide_action
-from core.contracts import load_options_chain, choose_contract, get_next_week_expiration
+from core.contracts import load_options_chain, find_best_option, get_next_week_expiration
 from core.paper_trader import PaperTradingPortfolio
+import pandas as pd
 import time
 import datetime as dt
 
@@ -80,22 +81,28 @@ class AutoTradingAgent:
                 return None
             
             # Get next week expiration
-            expiration = get_next_week_expiration()
+            expiration = get_next_week_expiration(ticker)
             
             # Load options chain
-            options_df = load_options_chain(ticker, expiration)
-            if options_df is None or len(options_df) == 0:
+            options_data = load_options_chain(ticker, expiration)
+            if options_data is None:
                 return None
+            
+            # Extract calls and puts from the dictionary
+            df_calls = options_data.get('calls', pd.DataFrame())
+            df_puts = options_data.get('puts', pd.DataFrame())
             
             # Choose contract based on action
             if action in ['BUY_CALL', 'SELL_CALL']:
-                calls = options_df[options_df['type'] == 'call'].copy()
-                if len(calls) == 0:
+                if len(df_calls) == 0:
                     return None
                 
-                # Use choose_contract helper
-                contract = choose_contract(calls, current_price, option_type='call')
-                if contract is not None:
+                # Use find_best_option helper (looks for OTM options with volume for buys)
+                criteria = 'otm' if 'BUY' in action else 'volume'
+                contract_df = find_best_option(options_data, option_type='call', criteria=criteria)
+                
+                if contract_df is not None and len(contract_df) > 0:
+                    contract = contract_df.iloc[0]
                     return {
                         'ticker': ticker,
                         'option_type': 'call',
@@ -106,12 +113,15 @@ class AutoTradingAgent:
                     }
             
             elif action in ['BUY_PUT', 'SELL_PUT']:
-                puts = options_df[options_df['type'] == 'put'].copy()
-                if len(puts) == 0:
+                if len(df_puts) == 0:
                     return None
                 
-                contract = choose_contract(puts, current_price, option_type='put')
-                if contract is not None:
+                # Use find_best_option helper
+                criteria = 'otm' if 'BUY' in action else 'volume'
+                contract_df = find_best_option(options_data, option_type='put', criteria=criteria)
+                
+                if contract_df is not None and len(contract_df) > 0:
+                    contract = contract_df.iloc[0]
                     return {
                         'ticker': ticker,
                         'option_type': 'put',
@@ -193,7 +203,13 @@ class AutoTradingAgent:
             # 1. Expiration approaching (< 2 days)
             # 2. P&L target hit (50% gain or -30% loss)
             
-            days_to_expiry = (pos.expiration - dt.datetime.now()).days
+            # Convert expiration to datetime if it's a timestamp
+            if isinstance(pos.expiration, (int, float)):
+                expiration_dt = dt.datetime.fromtimestamp(pos.expiration)
+            else:
+                expiration_dt = pos.expiration
+            
+            days_to_expiry = (expiration_dt - dt.datetime.now()).days
             
             # Get current option price (simplified - would need live data)
             # For now, just check expiration
