@@ -5,6 +5,7 @@ import threading
 import time
 import json
 from pathlib import Path
+import datetime as dt
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -381,8 +382,19 @@ with tab3:
             positions_data = []
             
             for pos in open_positions:
-                days_held = (pd.Timestamp.now() - pos.entry_date).days
-                days_to_expiry = (pos.expiration - pd.Timestamp.now()).days
+                # Convert timestamps to datetime if needed
+                if isinstance(pos.entry_date, (int, float)):
+                    entry_date = dt.datetime.fromtimestamp(pos.entry_date)
+                else:
+                    entry_date = pos.entry_date
+                    
+                if isinstance(pos.expiration, (int, float)):
+                    expiration = dt.datetime.fromtimestamp(pos.expiration)
+                else:
+                    expiration = pos.expiration
+                
+                days_held = (pd.Timestamp.now() - entry_date).days
+                days_to_expiry = (expiration - pd.Timestamp.now()).days
                 cost = pos.entry_price * pos.quantity * 100
                 
                 positions_data.append({
@@ -391,9 +403,9 @@ with tab3:
                     'Strike': f"${pos.strike:.2f}",
                     'Qty': pos.quantity,
                     'Entry Price': f"${pos.entry_price:.2f}",
-                    'Entry Date': pos.entry_date.strftime('%Y-%m-%d'),
+                    'Entry Date': entry_date.strftime('%Y-%m-%d'),
                     'Days Held': days_held,
-                    'Expiration': pos.expiration.strftime('%Y-%m-%d'),
+                    'Expiration': expiration.strftime('%Y-%m-%d'),
                     'Days to Expiry': days_to_expiry,
                     'Cost': f"${cost:.2f}"
                 })
@@ -413,6 +425,19 @@ with tab3:
             closed_data = []
             
             for pos in closed_positions:
+                # Convert timestamps to datetime if needed
+                if isinstance(pos.entry_date, (int, float)):
+                    entry_date = dt.datetime.fromtimestamp(pos.entry_date)
+                else:
+                    entry_date = pos.entry_date
+                    
+                if isinstance(pos.exit_date, (int, float)):
+                    exit_date = dt.datetime.fromtimestamp(pos.exit_date)
+                elif pos.exit_date is None:
+                    exit_date = None
+                else:
+                    exit_date = pos.exit_date
+                
                 pnl = pos.get_pnl()
                 pnl_pct = pos.get_pnl_percent()
                 
@@ -425,8 +450,8 @@ with tab3:
                     'Exit': f"${pos.exit_price:.2f}",
                     'P&L': f"${pnl:.2f}",
                     'P&L %': f"{pnl_pct:+.1f}%",
-                    'Entry Date': pos.entry_date.strftime('%Y-%m-%d'),
-                    'Exit Date': pos.exit_date.strftime('%Y-%m-%d') if pos.exit_date else 'N/A'
+                    'Entry Date': entry_date.strftime('%Y-%m-%d'),
+                    'Exit Date': exit_date.strftime('%Y-%m-%d') if exit_date else 'N/A'
                 })
             
             df = pd.DataFrame(closed_data)
