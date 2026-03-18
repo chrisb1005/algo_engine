@@ -189,9 +189,21 @@ def get_next_week_expiration(ticker):
     expirations = meta["expirations"]
 
     today = dt.datetime.now().timestamp()
+    min_days_out = 3  # Minimum days in the future
+    min_timestamp = today + (min_days_out * 24 * 60 * 60)
 
-    # Convert timestamps to correct seconds comparison
-    nearest = min(expirations, key=lambda x: abs(x - (today // 1)))
+    # Filter for future expirations at least min_days_out away
+    future_expirations = [exp for exp in expirations if exp >= min_timestamp]
+    
+    if not future_expirations:
+        # Fallback to any future expiration if none meet min_days_out
+        future_expirations = [exp for exp in expirations if exp > today]
+    
+    if not future_expirations:
+        return None
+    
+    # Get the nearest future expiration
+    nearest = min(future_expirations)
 
     return nearest
 

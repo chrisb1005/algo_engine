@@ -84,6 +84,14 @@ class AutoTradingAgent:
             
             # Get next week expiration
             expiration = get_next_week_expiration(ticker)
+            if expiration is None:
+                self.log_message(f"{ticker}: No suitable expiration date found")
+                return None
+            
+            # Log expiration info for debugging
+            exp_date = dt.datetime.fromtimestamp(expiration)
+            days_until = (exp_date - dt.datetime.now()).days
+            self.log_message(f"{ticker}: Using expiration {exp_date.strftime('%Y-%m-%d')} ({days_until} days away)")
             
             # Load options chain
             options_data = load_options_chain(ticker, expiration)
@@ -221,8 +229,9 @@ class AutoTradingAgent:
             days_to_expiry = (expiration_dt - dt.datetime.now()).days
             
             # Get current option price (simplified - would need live data)
-            # For now, just check expiration
+            # For now, just check expiration (close if 1 day or less remaining)
             if days_to_expiry <= 1:
+                self.log_message(f"{pos.ticker}: Position has {days_to_expiry} days to expiry (expires {expiration_dt.strftime('%Y-%m-%d')})")  
                 # Close position at entry price (simplified)
                 self.portfolio.close_position(pos, pos.entry_price)
                 self.log_message(f"⚠️ CLOSED {pos.ticker} {pos.option_type} - Near expiration")
