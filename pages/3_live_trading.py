@@ -246,7 +246,7 @@ with tab1:
     # Manual save/load section
     if st.session_state['portfolio']:
         st.markdown("---")
-        st.markdown("**💾 Save/Load**")
+        st.markdown("**💾 Local Save/Load**")
         
         col1, col2 = st.columns(2)
         
@@ -273,12 +273,181 @@ with tab1:
                 file_time = os.path.getmtime(DEFAULT_PORTFOLIO_PATH)
                 from datetime import datetime
                 st.caption(f"Last saved: {datetime.fromtimestamp(file_time).strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Current status
-    if st.session_state['portfolio']:
+        
+        # Supabase cloud sync section
         st.markdown("---")
-        st.info(f"📊 Portfolio Active | Monitoring: {', '.join(st.session_state.get('tickers', []))} | "
-               f"Status: {'🟢 RUNNING' if st.session_state['agent_running'] else '🔴 STOPPED'}")
+        st.markdown("**☁️ Supabase Cloud Sync**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            supabase_url = st.text_input(
+                "Supabase URL",
+                value=os.getenv('SUPABASE_URL', ''),
+                help="Your Supabase project URL",
+                key="supabase_url",
+                type="password"
+            )
+            supabase_key = st.text_input(
+                "Supabase Key",
+                value=os.getenv('SUPABASE_KEY', ''),
+                help="Your Supabase API key",
+                key="supabase_key",
+                type="password"
+            )
+        
+        with col2:
+            portfolio_name = st.text_input(
+                "Portfolio Name",
+                value="default",
+                help="Unique name for this portfolio",
+                key="portfolio_name"
+            )
+            
+            if st.button("☁️ Sync to Cloud", help="Save portfolio to Supabase"):
+                with st.spinner("Syncing to Supabase..."):
+                    try:
+                        # Temporarily set env vars if provided
+                        if supabase_url:
+                            os.environ['SUPABASE_URL'] = supabase_url
+                        if supabase_key:
+                            os.environ['SUPABASE_KEY'] = supabase_key
+                        
+                        portfolio = st.session_state['portfolio']
+                        success, result = portfolio.save_to_supabase(portfolio_name)
+                        
+                        if success:
+                            st.success(f"✅ Synced to Supabase!")
+                            st.info(f"💾 {result}")
+                        else:
+                            st.error(f"❌ Sync failed: {result}")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+                        st.info("💡 Make sure you have SUPABASE_URL and SUPABASE_KEY set. See setup instructions below.")
+            
+            if st.button("📥 Load from Cloud", help="Load portfolio from Supabase"):
+                with st.spinner("Loading from Supabase..."):
+                    try:
+                        # Temporarily set env vars if provided
+                        if supabase_url:
+                            os.environ['SUPABASE_URL'] = supabase_url
+                        if supabase_key:
+                            os.environ['SUPABASE_KEY'] = supabase_key
+                        
+                        from core.paper_trader import PaperTradingPortfolio
+                        loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
+                        
+                        if loaded_portfolio:
+                            st.session_state['portfolio'] = loaded_portfolio
+                            st.success(f"✅ Loaded portfolio from Supabase!")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ No portfolio found with that name in Supabase")
+                    except Exception as e:
+                        st.error(f"❌ Error: {str(e)}")
+        
+        # Setup instructions expander
+        with st.expander("📖 Supabase Setup Instructions (Free - 2 minutes)"):
+            st.markdown("""
+            **Step 1: Create Free Supabase Account**
+            1. Go to [supabase.com](https://supabase.com/)
+            2. Click "Start your project"
+            3. Sign in with GitHub (or email)
+            
+            **Step 2: Create New Project**
+            1. Click "New Project"
+            2. Choose organization (or create one)
+            3. Enter project name (e.g., "algo-trader")
+            4. Create a strong database password
+            5. Choose region closest to you
+            6. Click "Create new project" (wait ~2 minutes for setup)
+            
+            **Step 3: Get Your Credentials**
+            1. Go to Project Settings (gear icon) > API
+            2. Find "Project URL" - copy this
+            3. Find "anon public" key under "Project API keys" - copy this
+            
+            **Step 4: Create Tables (Run SQL)**
+            1. Go to SQL Editor (left sidebar)
+            2. Click "New Query"
+            3. Paste this SQL:
+            
+            ```sql
+            -- Portfolios table
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                starting_cash NUMERIC NOT NULL,
+                current_cash NUMERIC NOT NULL,
+                max_position_size NUMERIC NOT NULL,
+                max_positions INTEGER NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            -- Positions table
+            CREATE TABLE IF NOT EXISTS positions (
+                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
+                ticker TEXT NOT NULL,
+                option_type TEXT NOT NULL,
+                strike NUMERIC NOT NULL,
+                expiration TIMESTAMP WITH TIME ZONE NOT NULL,
+                quantity INTEGER NOT NULL,
+                entry_price NUMERIC NOT NULL,
+                entry_date TIMESTAMP WITH TIME ZONE NOT NULL,
+                exit_price NUMERIC,
+                exit_date TIMESTAMP WITH TIME ZONE,
+                status TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            -- Trades table
+            CREATE TABLE IF NOT EXISTS trades (
+                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+                portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
+                date TIMESTAMP WITH TIME ZONE NOT NULL,
+                ticker TEXT,
+                action TEXT,
+                option_type TEXT,
+                strike NUMERIC,
+                quantity INTEGER,
+                price NUMERIC,
+                cost NUMERIC,
+                pnl NUMERIC,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+            
+            -- Create indexes for better performance
+            CREATE INDEX IF NOT EXISTS idx_positions_portfolio ON positions(portfolio_id);
+            CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades(portfolio_id);
+            ```
+            
+            4. Click "Run" to create the tables
+            
+            **Step 5: Use Your Credentials**
+            - Either paste them in the fields above, OR
+            - Create a `.env` file in your project folder with:
+            ```
+            SUPABASE_URL=your_project_url_here
+            SUPABASE_KEY=your_anon_key_here
+            ```
+            
+            **That's it!** Click "☁️ Sync to Cloud" to save your portfolio. It's free up to 500MB!
+            
+            **Benefits over Google Sheets:**
+            - ✅ No JSON credentials needed
+            - ✅ Faster (real database vs spreadsheet)
+            - ✅ More secure
+            - ✅ Better for trading data
+            - ✅ 2-minute setup vs 15 minutes
+            """)
+        
+        # Current status
+        st.markdown("---")
+        status_text = '🟢 RUNNING' if st.session_state['agent_running'] else '🔴 STOPPED'
+        tickers_str = ', '.join(st.session_state.get('tickers', []))
+        st.info(f"📊 Portfolio Active | Monitoring: {tickers_str} | Status: {status_text}")
 
 # ----- TAB 2: PORTFOLIO -----
 with tab2:

@@ -285,6 +285,123 @@ class PaperTradingPortfolio:
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)
     
+    def save_to_supabase(self, portfolio_name: str = "default"):
+        """
+        Save portfolio to Supabase
+        
+        Args:
+            portfolio_name: Unique name for this portfolio
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            from core.supabase_sync import setup_supabase_sync
+            
+            sync = setup_supabase_sync()
+            if sync is None:
+                return False, "Supabase sync not configured. Set SUPABASE_URL and SUPABASE_KEY environment variables."
+            
+            success, result = sync.save_portfolio(self, portfolio_name)
+            return success, result
+            
+        except Exception as e:
+            return False, f"Error syncing to Supabase: {str(e)}"
+    
+    @staticmethod
+    def load_from_supabase(portfolio_name: str = "default"):
+        """
+        Load portfolio from Supabase
+        
+        Args:
+            portfolio_name: Name of the portfolio to load
+            
+        Returns:
+            PaperTradingPortfolio instance or None
+        """
+        try:
+            from core.supabase_sync import setup_supabase_sync
+            from core.paper_trader import Position
+            
+            sync = setup_supabase_sync()
+            if sync is None:
+                return None
+            
+            data = sync.load_portfolio(portfolio_name)
+            if not data:
+                return None
+            
+            portfolio_data = data['portfolio']
+            
+            portfolio = PaperTradingPortfolio(
+                starting_cash=portfolio_data['starting_cash'],
+                max_position_size=portfolio_data['max_position_size'],
+                max_positions=portfolio_data['max_positions']
+            )
+            portfolio.cash = portfolio_data['current_cash']
+            
+            # Restore positions
+            for pos_data in data['positions']:
+                pos = Position(
+                    ticker=pos_data['ticker'],
+                    option_type=pos_data['option_type'],
+                    strike=pos_data['strike'],
+                    expiration=dt.datetime.fromisoformat(pos_data['expiration']),
+                    quantity=pos_data['quantity'],
+                    entry_price=pos_data['entry_price'],
+                    entry_date=dt.datetime.fromisoformat(pos_data['entry_date'])
+                )
+                if pos_data['exit_price']:
+                    pos.exit_price = pos_data['exit_price']
+                if pos_data['exit_date']:
+                    pos.exit_date = dt.datetime.fromisoformat(pos_data['exit_date'])
+                pos.status = pos_data['status']
+                portfolio.positions.append(pos)
+            
+            # Restore trade history
+            for trade_data in data['trades']:
+                trade = {
+                    'date': dt.datetime.fromisoformat(trade_data['date']),
+                    'ticker': trade_data['ticker'],
+                    'action': trade_data['action'],
+                    'option_type': trade_data['option_type'],
+                    'strike': trade_data['strike'],
+                    'quantity': trade_data['quantity'],
+                    'price': trade_data['price'],
+                    'cost': trade_data['cost'],
+                    'pnl': trade_data['pnl']
+                }
+                portfolio.trade_history.append(trade)
+            
+            return portfolio
+            
+        except Exception as e:
+            print(f"Error loading from Supabase: {str(e)}")
+            return None
+    
+    def save_to_google_sheets(self, credentials_path=None):
+        """
+        Save portfolio to Google Sheets (deprecated - use save_to_supabase)
+        
+        Args:
+            credentials_path: Path to Google credentials JSON file
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        try:
+            from core.sheets_sync import setup_google_sheets_sync
+            
+            sync = setup_google_sheets_sync(credentials_path)
+            if sync is None:
+                return False, "Google Sheets sync not configured"
+            
+            success, result = sync.save_portfolio(self)
+            return success, result
+            
+        except Exception as e:
+            return False, f"Error syncing to Google Sheets: {str(e)}"
+    
     @staticmethod
     def load_from_file(filepath):
         """Load portfolio from JSON file"""

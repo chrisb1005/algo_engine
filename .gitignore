@@ -214,3 +214,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Environment variables (Supabase credentials)
+.env
+.env.local
+
+# Google Sheets credentials (deprecated)
+google_credentials.json
+**/google_credentials.json
+
+# Portfolio state files (local data)
+portfolio_state.json
+portfolio_state_config.json
