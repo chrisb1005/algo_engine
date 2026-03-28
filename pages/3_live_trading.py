@@ -314,7 +314,15 @@ with tab1:
                             os.environ['SUPABASE_KEY'] = supabase_key
                         
                         portfolio = st.session_state['portfolio']
-                        success, result = portfolio.save_to_supabase(portfolio_name)
+                        
+                        # Prepare agent config
+                        agent_config = {
+                            'tickers': st.session_state.get('tickers', []),
+                            'check_interval': st.session_state.get('check_interval', 300),
+                            'position_size': st.session_state['agent'].position_size if st.session_state.get('agent') else 1
+                        }
+                        
+                        success, result = portfolio.save_to_supabase(portfolio_name, agent_config)
                         
                         if success:
                             st.success(f"✅ Synced to Supabase!")
@@ -327,6 +335,7 @@ with tab1:
             
             if st.button("📥 Load from Cloud", help="Load portfolio from Supabase"):
                 with st.spinner("Loading from Supabase..."):
+                    error_occurred = False
                     try:
                         # Temporarily set env vars if provided
                         if supabase_url:
@@ -334,17 +343,79 @@ with tab1:
                         if supabase_key:
                             os.environ['SUPABASE_KEY'] = supabase_key
                         
-                        from core.paper_trader import PaperTradingPortfolio
-                        loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
+                        # First check if the connection works
+                        from core.supabase_sync import setup_supabase_sync
+                        sync = setup_supabase_sync()
                         
-                        if loaded_portfolio:
-                            st.session_state['portfolio'] = loaded_portfolio
-                            st.success(f"✅ Loaded portfolio from Supabase!")
-                            st.rerun()
+                        if not sync:
+                            st.error("❌ Failed to connect to Supabase. Check your credentials.")
+                            st.info("💡 Make sure SUPABASE_URL and SUPABASE_KEY are set in .env or entered above.")
+                            error_occurred = True
                         else:
-                            st.warning("⚠️ No portfolio found with that name in Supabase")
+                            # Try to load raw data first to see what's happening
+                            data = sync.load_portfolio(portfolio_name)
+                            
+                            if not data:
+                                st.warning(f"⚠️ No portfolio found with name '{portfolio_name}' in Supabase")
+                                st.info("💡 Make sure you've saved a portfolio with 'Sync to Cloud' first.")
+                                error_occurred = True
+                            else:
+                                # Now try to reconstruct the portfolio
+                                from core.paper_trader import PaperTradingPortfolio
+                                from core.auto_agent import AutoTradingAgent
+                                
+                                loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
+                                
+                                if not loaded_portfolio:
+                                    st.error("❌ Failed to reconstruct portfolio from database")
+                                    st.info("💡 Raw data was found but couldn't be loaded. Check console for details.")
+                                    error_occurred = True
+                                else:
+                                    st.session_state['portfolio'] = loaded_portfolio
+                                    
+                                    # Get agent config from portfolio data
+                                    if data['portfolio'].get('agent_config'):
+                                        import json
+                                        agent_config = json.loads(data['portfolio']['agent_config'])
+                                        
+                                        # Recreate agent with saved config
+                                        tickers = agent_config.get('tickers', [])
+                                        check_interval = agent_config.get('check_interval', 300)
+                                        position_size = agent_config.get('position_size', 1)
+                                        
+                                        if tickers:
+                                            # Define save callback
+                                            def save_portfolio():
+                                                try:
+                                                    loaded_portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
+                                                except Exception as e:
+                                                    print(f"Auto-save error: {e}")
+                                            
+                                            agent = AutoTradingAgent(
+                                                portfolio=loaded_portfolio,
+                                                tickers=tickers,
+                                                check_interval=check_interval,
+                                                position_size=position_size,
+                                                save_callback=save_portfolio
+                                            )
+                                            
+                                            st.session_state['agent'] = agent
+                                            st.session_state['tickers'] = tickers
+                                            st.session_state['check_interval'] = check_interval
+                                    
+                                    st.success(f"✅ Loaded portfolio from Supabase!")
+                                    st.info(f"📊 Portfolio Value: ${loaded_portfolio.get_portfolio_value():,.2f} | Open Positions: {len(loaded_portfolio.get_open_positions())}")
+                    
                     except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
+                        st.error(f"❌ Error loading from Supabase: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc(), language="python")
+                        st.info("💡 Common fixes:\n- Run the migration SQL if agent_config column is missing\n- Check that your Supabase credentials are correct\n- Verify the portfolio name matches what you saved")
+                        error_occurred = True
+                    
+                    # Only rerun if no error occurred and we successfully loaded
+                    if not error_occurred:
+                        st.rerun()
         
         # Setup instructions expander
         with st.expander("📖 Supabase Setup Instructions (Free - 2 minutes)"):
@@ -381,6 +452,7 @@ with tab1:
                 current_cash NUMERIC NOT NULL,
                 max_position_size NUMERIC NOT NULL,
                 max_positions INTEGER NOT NULL,
+                agent_config TEXT,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
@@ -432,6 +504,20 @@ with tab1:
             SUPABASE_URL=your_project_url_here
             SUPABASE_KEY=your_anon_key_here
             ```
+            
+            ---
+            
+            **⚠️ IMPORTANT: If you created tables before, run this migration:**
+            
+            If you already created the tables earlier (before agent_config was added), go to SQL Editor and run:
+            
+            ```sql
+            ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS agent_config TEXT;
+            ```
+            
+            This adds support for saving your agent configuration (tickers, check interval, etc.) to the cloud.
+            
+            ---
             
             **That's it!** Click "☁️ Sync to Cloud" to save your portfolio. It's free up to 500MB!
             

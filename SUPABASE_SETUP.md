@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS portfolios (
     current_cash NUMERIC NOT NULL,
     max_position_size NUMERIC NOT NULL,
     max_positions INTEGER NOT NULL,
+    agent_config TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -90,6 +91,17 @@ CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades(portfolio_id);
 ```
 
 You should see "Success. No rows returned" - that's good!
+
+### 4b. Migration for Existing Users (Optional)
+
+If you already created tables before, you may need to add the `agent_config` column:
+
+```sql
+-- Add agent_config column if it doesn't exist
+ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS agent_config TEXT;
+```
+
+This stores your agent configuration (tickers, check interval, position size) in the cloud.
 
 ### 5. Add Credentials to Your Project
 

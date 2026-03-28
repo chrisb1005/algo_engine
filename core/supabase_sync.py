@@ -42,13 +42,14 @@ class SupabasePortfolioSync:
                       'strike', 'quantity', 'price', 'cost', 'pnl']
         }
     
-    def save_portfolio(self, portfolio, portfolio_name: str = "default"):
+    def save_portfolio(self, portfolio, portfolio_name: str = "default", agent_config: dict = None):
         """
         Save portfolio to Supabase
         
         Args:
             portfolio: PaperTradingPortfolio instance
             portfolio_name: Unique name for this portfolio
+            agent_config: Optional dict with tickers, check_interval, position_size
             
         Returns:
             tuple: (success: bool, message: str)
@@ -65,6 +66,11 @@ class SupabasePortfolioSync:
                 'max_positions': portfolio.max_positions,
                 'updated_at': dt.datetime.now().isoformat()
             }
+            
+            # Add agent config if provided
+            if agent_config:
+                import json
+                portfolio_data['agent_config'] = json.dumps(agent_config)
             
             if existing.data:
                 # Update existing portfolio

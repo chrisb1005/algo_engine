@@ -285,12 +285,13 @@ class PaperTradingPortfolio:
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=2)
     
-    def save_to_supabase(self, portfolio_name: str = "default"):
+    def save_to_supabase(self, portfolio_name: str = "default", agent_config: dict = None):
         """
         Save portfolio to Supabase
         
         Args:
             portfolio_name: Unique name for this portfolio
+            agent_config: Optional dict with agent configuration (tickers, check_interval, position_size)
             
         Returns:
             tuple: (success: bool, message: str)
@@ -302,7 +303,7 @@ class PaperTradingPortfolio:
             if sync is None:
                 return False, "Supabase sync not configured. Set SUPABASE_URL and SUPABASE_KEY environment variables."
             
-            success, result = sync.save_portfolio(self, portfolio_name)
+            success, result = sync.save_portfolio(self, portfolio_name, agent_config)
             return success, result
             
         except Exception as e:
