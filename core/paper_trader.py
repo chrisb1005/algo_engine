@@ -342,26 +342,42 @@ class PaperTradingPortfolio:
             
             # Restore positions
             for pos_data in data['positions']:
+                # Parse datetimes and strip timezone info for consistency
+                expiration = dt.datetime.fromisoformat(pos_data['expiration'])
+                if hasattr(expiration, 'tzinfo') and expiration.tzinfo is not None:
+                    expiration = expiration.replace(tzinfo=None)
+                
+                entry_date = dt.datetime.fromisoformat(pos_data['entry_date'])
+                if hasattr(entry_date, 'tzinfo') and entry_date.tzinfo is not None:
+                    entry_date = entry_date.replace(tzinfo=None)
+                
                 pos = Position(
                     ticker=pos_data['ticker'],
                     option_type=pos_data['option_type'],
                     strike=pos_data['strike'],
-                    expiration=dt.datetime.fromisoformat(pos_data['expiration']),
+                    expiration=expiration,
                     quantity=pos_data['quantity'],
                     entry_price=pos_data['entry_price'],
-                    entry_date=dt.datetime.fromisoformat(pos_data['entry_date'])
+                    entry_date=entry_date
                 )
                 if pos_data['exit_price']:
                     pos.exit_price = pos_data['exit_price']
                 if pos_data['exit_date']:
-                    pos.exit_date = dt.datetime.fromisoformat(pos_data['exit_date'])
+                    exit_date = dt.datetime.fromisoformat(pos_data['exit_date'])
+                    if hasattr(exit_date, 'tzinfo') and exit_date.tzinfo is not None:
+                        exit_date = exit_date.replace(tzinfo=None)
+                    pos.exit_date = exit_date
                 pos.status = pos_data['status']
                 portfolio.positions.append(pos)
             
             # Restore trade history
             for trade_data in data['trades']:
+                trade_date = dt.datetime.fromisoformat(trade_data['date'])
+                if hasattr(trade_date, 'tzinfo') and trade_date.tzinfo is not None:
+                    trade_date = trade_date.replace(tzinfo=None)
+                
                 trade = {
-                    'date': dt.datetime.fromisoformat(trade_data['date']),
+                    'date': trade_date,
                     'ticker': trade_data['ticker'],
                     'action': trade_data['action'],
                     'option_type': trade_data['option_type'],

@@ -562,8 +562,15 @@ with tab3:
                 else:
                     expiration = pos.expiration
                 
-                days_held = (pd.Timestamp.now() - entry_date).days
-                days_to_expiry = (expiration - pd.Timestamp.now()).days
+                # Remove timezone info for comparison (if present)
+                now = dt.datetime.now()
+                if hasattr(entry_date, 'tzinfo') and entry_date.tzinfo is not None:
+                    entry_date = entry_date.replace(tzinfo=None)
+                if hasattr(expiration, 'tzinfo') and expiration.tzinfo is not None:
+                    expiration = expiration.replace(tzinfo=None)
+                
+                days_held = (now - entry_date).days
+                days_to_expiry = (expiration - now).days
                 cost = pos.entry_price * pos.quantity * 100
                 
                 positions_data.append({
@@ -606,6 +613,12 @@ with tab3:
                     exit_date = None
                 else:
                     exit_date = pos.exit_date
+                
+                # Remove timezone info (if present)
+                if hasattr(entry_date, 'tzinfo') and entry_date.tzinfo is not None:
+                    entry_date = entry_date.replace(tzinfo=None)
+                if exit_date and hasattr(exit_date, 'tzinfo') and exit_date.tzinfo is not None:
+                    exit_date = exit_date.replace(tzinfo=None)
                 
                 pnl = pos.get_pnl()
                 pnl_pct = pos.get_pnl_percent()
