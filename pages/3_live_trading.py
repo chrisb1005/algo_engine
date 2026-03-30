@@ -14,12 +14,6 @@ from core.paper_trader import PaperTradingPortfolio
 from core.auto_agent import AutoTradingAgent
 import pandas as pd
 
-# Default portfolio save path
-DEFAULT_PORTFOLIO_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    'portfolio_state.json'
-)
-
 st.set_page_config(page_title="Paper Trading Agent", page_icon="🤖", layout="wide")
 
 st.title("🤖 Paper Trading Agent")
@@ -42,46 +36,6 @@ if 'tickers' not in st.session_state:
     st.session_state['tickers'] = []
 if 'check_interval' not in st.session_state:
     st.session_state['check_interval'] = 300
-if 'portfolio_loaded' not in st.session_state:
-    st.session_state['portfolio_loaded'] = False
-
-# Auto-load portfolio from saved state (only once per session)
-if not st.session_state['portfolio_loaded'] and os.path.exists(DEFAULT_PORTFOLIO_PATH):
-    try:
-        portfolio = PaperTradingPortfolio.load_from_file(DEFAULT_PORTFOLIO_PATH)
-        
-        # Try to load agent config if exists
-        config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                st.session_state['tickers'] = config.get('tickers', [])
-                st.session_state['check_interval'] = config.get('check_interval', 300)
-                position_size = config.get('position_size', 1)
-                
-                # Recreate agent with loaded config
-                if st.session_state['tickers']:
-                    # Define save callback
-                    def save_portfolio():
-                        try:
-                            portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
-                        except Exception as e:
-                            print(f"Auto-save error: {e}")
-                    
-                    agent = AutoTradingAgent(
-                        portfolio=portfolio,
-                        tickers=st.session_state['tickers'],
-                        check_interval=st.session_state['check_interval'],
-                        position_size=position_size,
-                        save_callback=save_portfolio
-                    )
-                    st.session_state['agent'] = agent
-        
-        st.session_state['portfolio'] = portfolio
-        st.session_state['portfolio_loaded'] = True
-        st.success(f"✅ Portfolio loaded from saved state! ({os.path.basename(DEFAULT_PORTFOLIO_PATH)})")
-    except Exception as e:
-        st.warning(f"⚠️ Could not load saved portfolio: {str(e)}")
 
 # Tabs
 tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Setup", "📊 Portfolio", "📈 Positions", "📜 Trade Log"])
@@ -171,20 +125,13 @@ with tab1:
                     max_positions=max_positions
                 )
                 
-                # Define save callback
-                def save_portfolio():
-                    try:
-                        portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
-                    except Exception as e:
-                        print(f"Auto-save error: {e}")
-                
                 # Create agent
                 agent = AutoTradingAgent(
                     portfolio=portfolio,
                     tickers=tickers,
                     check_interval=check_interval,
                     position_size=contracts_per_trade,
-                    save_callback=save_portfolio
+                    save_callback=None
                 )
                 
                 st.session_state['portfolio'] = portfolio
@@ -192,38 +139,19 @@ with tab1:
                 st.session_state['tickers'] = tickers
                 st.session_state['check_interval'] = check_interval
                 
-                # Save portfolio and config immediately
-                try:
-                    portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
-                    # Save agent config separately
-                    config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
-                    with open(config_path, 'w') as f:
-                        json.dump({
-                            'tickers': tickers,
-                            'check_interval': check_interval,
-                            'position_size': contracts_per_trade
-                        }, f)
-                    st.success(f"✅ Portfolio created and saved with ${starting_cash:,.0f}")
-                except Exception as e:
-                    st.success(f"✅ Portfolio created with ${starting_cash:,.0f}")
-                    st.warning(f"⚠️ Could not auto-save: {str(e)}")
+                st.success(f"✅ Portfolio created with ${starting_cash:,.0f}")
+                st.info("💡 Use 'Sync to Cloud' below to save your portfolio to Supabase")
                 
                 st.rerun()
     
     with col2:
         if st.button("🗑️ Reset Portfolio", disabled=st.session_state['portfolio'] is None or st.session_state['agent_running']):
-            # Delete saved files
-            if os.path.exists(DEFAULT_PORTFOLIO_PATH):
-                os.remove(DEFAULT_PORTFOLIO_PATH)
-            config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
-            if os.path.exists(config_path):
-                os.remove(config_path)
-            
             st.session_state['portfolio'] = None
             st.session_state['agent'] = None
             st.session_state['agent_running'] = False
-            st.session_state['portfolio_loaded'] = False
-            st.success("Portfolio reset and saved state cleared")
+            st.session_state['agent_thread'] = None
+            st.session_state['tickers'] = []
+            st.success("✅ Portfolio reset")
             st.rerun()
     
     with col3:
@@ -243,38 +171,8 @@ with tab1:
             st.warning("Agent stopped")
             st.rerun()
     
-    # Manual save/load section
+    # Supabase cloud sync section
     if st.session_state['portfolio']:
-        st.markdown("---")
-        st.markdown("**💾 Local Save/Load**")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("💾 Save Portfolio", help="Manually save current portfolio state"):
-                try:
-                    portfolio = st.session_state['portfolio']
-                    portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
-                    # Save agent config
-                    config_path = DEFAULT_PORTFOLIO_PATH.replace('.json', '_config.json')
-                    with open(config_path, 'w') as f:
-                        json.dump({
-                            'tickers': st.session_state.get('tickers', []),
-                            'check_interval': st.session_state.get('check_interval', 300),
-                            'position_size': st.session_state['agent'].position_size if st.session_state['agent'] else 1
-                        }, f)
-                    st.success(f"✅ Portfolio saved to {os.path.basename(DEFAULT_PORTFOLIO_PATH)}")
-                except Exception as e:
-                    st.error(f"❌ Save failed: {str(e)}")
-        
-        with col2:
-            st.caption(f"📁 {os.path.basename(DEFAULT_PORTFOLIO_PATH)}")
-            if os.path.exists(DEFAULT_PORTFOLIO_PATH):
-                file_time = os.path.getmtime(DEFAULT_PORTFOLIO_PATH)
-                from datetime import datetime
-                st.caption(f"Last saved: {datetime.fromtimestamp(file_time).strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        # Supabase cloud sync section
         st.markdown("---")
         st.markdown("**☁️ Supabase Cloud Sync**")
         
@@ -297,12 +195,47 @@ with tab1:
             )
         
         with col2:
-            portfolio_name = st.text_input(
-                "Portfolio Name",
-                value="default",
-                help="Unique name for this portfolio",
-                key="portfolio_name"
-            )
+            # Try to get existing portfolio names
+            existing_portfolios = []
+            try:
+                from core.supabase_sync import setup_supabase_sync
+                if supabase_url:
+                    os.environ['SUPABASE_URL'] = supabase_url
+                if supabase_key:
+                    os.environ['SUPABASE_KEY'] = supabase_key
+                sync = setup_supabase_sync()
+                if sync:
+                    existing_portfolios = sync.list_portfolio_names()
+            except Exception:
+                pass  # If error, just show empty list
+            
+            # Portfolio selection/creation
+            if existing_portfolios:
+                portfolio_options = existing_portfolios + ["➕ Create New Portfolio"]
+                selected_option = st.selectbox(
+                    "Select Portfolio",
+                    options=portfolio_options,
+                    help="Choose existing portfolio or create new",
+                    key="portfolio_selector"
+                )
+                
+                if selected_option == "➕ Create New Portfolio":
+                    portfolio_name = st.text_input(
+                        "New Portfolio Name",
+                        value="",
+                        placeholder="Enter unique name",
+                        help="Unique name for this portfolio",
+                        key="new_portfolio_name"
+                    )
+                else:
+                    portfolio_name = selected_option
+            else:
+                portfolio_name = st.text_input(
+                    "Portfolio Name",
+                    value="default",
+                    help="Unique name for this portfolio",
+                    key="portfolio_name"
+                )
             
             if st.button("☁️ Sync to Cloud", help="Save portfolio to Supabase"):
                 with st.spinner("Syncing to Supabase..."):
@@ -360,51 +293,42 @@ with tab1:
                                 st.info("💡 Make sure you've saved a portfolio with 'Sync to Cloud' first.")
                                 error_occurred = True
                             else:
-                                # Now try to reconstruct the portfolio
+                                # Now try to reconstruct the portfolio (will raise exception if fails)
                                 from core.paper_trader import PaperTradingPortfolio
                                 from core.auto_agent import AutoTradingAgent
                                 
                                 loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
+                                st.session_state['portfolio'] = loaded_portfolio
                                 
-                                if not loaded_portfolio:
-                                    st.error("❌ Failed to reconstruct portfolio from database")
-                                    st.info("💡 Raw data was found but couldn't be loaded. Check console for details.")
-                                    error_occurred = True
-                                else:
-                                    st.session_state['portfolio'] = loaded_portfolio
+                                # Get agent config from portfolio data
+                                if data['portfolio'].get('agent_config'):
+                                    import json
+                                    agent_config = json.loads(data['portfolio']['agent_config'])
                                     
-                                    # Get agent config from portfolio data
-                                    if data['portfolio'].get('agent_config'):
-                                        import json
-                                        agent_config = json.loads(data['portfolio']['agent_config'])
-                                        
-                                        # Recreate agent with saved config
-                                        tickers = agent_config.get('tickers', [])
-                                        check_interval = agent_config.get('check_interval', 300)
-                                        position_size = agent_config.get('position_size', 1)
-                                        
-                                        if tickers:
-                                            # Define save callback
-                                            def save_portfolio():
-                                                try:
-                                                    loaded_portfolio.save_to_file(DEFAULT_PORTFOLIO_PATH)
-                                                except Exception as e:
-                                                    print(f"Auto-save error: {e}")
-                                            
-                                            agent = AutoTradingAgent(
-                                                portfolio=loaded_portfolio,
-                                                tickers=tickers,
-                                                check_interval=check_interval,
-                                                position_size=position_size,
-                                                save_callback=save_portfolio
-                                            )
-                                            
-                                            st.session_state['agent'] = agent
-                                            st.session_state['tickers'] = tickers
-                                            st.session_state['check_interval'] = check_interval
+                                    # Recreate agent with saved config
+                                    tickers = agent_config.get('tickers', [])
+                                    check_interval = agent_config.get('check_interval', 300)
+                                    position_size = agent_config.get('position_size', 1)
                                     
-                                    st.success(f"✅ Loaded portfolio from Supabase!")
-                                    st.info(f"📊 Portfolio Value: ${loaded_portfolio.get_portfolio_value():,.2f} | Open Positions: {len(loaded_portfolio.get_open_positions())}")
+                                    if tickers:
+                                        agent = AutoTradingAgent(
+                                            portfolio=loaded_portfolio,
+                                            tickers=tickers,
+                                            check_interval=check_interval,
+                                            position_size=position_size,
+                                            save_callback=None
+                                        )
+                                        
+                                        st.session_state['agent'] = agent
+                                        st.session_state['tickers'] = tickers
+                                        st.session_state['check_interval'] = check_interval
+                                
+                                # Set success flag to show message after rerun
+                                st.session_state['load_success'] = {
+                                    'portfolio_name': portfolio_name,
+                                    'portfolio_value': loaded_portfolio.get_portfolio_value(),
+                                    'open_positions': len(loaded_portfolio.get_open_positions())
+                                }
                     
                     except Exception as e:
                         st.error(f"❌ Error loading from Supabase: {str(e)}")
@@ -416,6 +340,13 @@ with tab1:
                     # Only rerun if no error occurred and we successfully loaded
                     if not error_occurred:
                         st.rerun()
+            
+            # Show success message after reload (if we just loaded)
+            if 'load_success' in st.session_state:
+                success_data = st.session_state['load_success']
+                st.success(f"✅ Loaded portfolio '{success_data['portfolio_name']}' from Supabase!")
+                st.info(f"📊 Portfolio Value: ${success_data['portfolio_value']:,.2f} | Open Positions: {success_data['open_positions']}")
+                del st.session_state['load_success']  # Clear the flag
         
         # Setup instructions expander
         with st.expander("📖 Supabase Setup Instructions (Free - 2 minutes)"):
@@ -749,11 +680,6 @@ with tab4:
                 if st.button("🔄 Force Check Now"):
                     with st.spinner("Running cycle..."):
                         agent.run_cycle()
-                        # Auto-save after cycle
-                        try:
-                            st.session_state['portfolio'].save_to_file(DEFAULT_PORTFOLIO_PATH)
-                        except:
-                            pass
                         st.rerun()
         
         # Display log
@@ -769,9 +695,4 @@ with tab4:
             if st.button("🔧 Run Test Cycle (Manual)", help="Run one check cycle manually"):
                 with st.spinner("Running test cycle..."):
                     agent.run_cycle()
-                    # Auto-save after cycle
-                    try:
-                        st.session_state['portfolio'].save_to_file(DEFAULT_PORTFOLIO_PATH)
-                    except:
-                        pass
                     st.rerun()

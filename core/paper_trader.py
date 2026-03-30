@@ -16,6 +16,7 @@ import pandas as pd
 import datetime as dt
 import json
 import os
+from dateutil import parser as dateutil_parser
 
 
 class Position:
@@ -344,11 +345,11 @@ class PaperTradingPortfolio:
             # Restore positions
             for pos_data in data['positions']:
                 # Parse datetimes and strip timezone info for consistency
-                expiration = dt.datetime.fromisoformat(pos_data['expiration'])
+                expiration = dateutil_parser.parse(pos_data['expiration'])
                 if hasattr(expiration, 'tzinfo') and expiration.tzinfo is not None:
                     expiration = expiration.replace(tzinfo=None)
                 
-                entry_date = dt.datetime.fromisoformat(pos_data['entry_date'])
+                entry_date = dateutil_parser.parse(pos_data['entry_date'])
                 if hasattr(entry_date, 'tzinfo') and entry_date.tzinfo is not None:
                     entry_date = entry_date.replace(tzinfo=None)
                 
@@ -364,7 +365,7 @@ class PaperTradingPortfolio:
                 if pos_data['exit_price']:
                     pos.exit_price = pos_data['exit_price']
                 if pos_data['exit_date']:
-                    exit_date = dt.datetime.fromisoformat(pos_data['exit_date'])
+                    exit_date = dateutil_parser.parse(pos_data['exit_date'])
                     if hasattr(exit_date, 'tzinfo') and exit_date.tzinfo is not None:
                         exit_date = exit_date.replace(tzinfo=None)
                     pos.exit_date = exit_date
@@ -373,7 +374,7 @@ class PaperTradingPortfolio:
             
             # Restore trade history
             for trade_data in data['trades']:
-                trade_date = dt.datetime.fromisoformat(trade_data['date'])
+                trade_date = dateutil_parser.parse(trade_data['date'])
                 if hasattr(trade_date, 'tzinfo') and trade_date.tzinfo is not None:
                     trade_date = trade_date.replace(tzinfo=None)
                 
@@ -393,8 +394,12 @@ class PaperTradingPortfolio:
             return portfolio
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             print(f"Error loading from Supabase: {str(e)}")
-            return None
+            print(error_details)
+            # Re-raise the exception so UI can catch and display it
+            raise Exception(f"Failed to load portfolio from Supabase: {str(e)}\n\nDetails:\n{error_details}")
     
     def save_to_google_sheets(self, credentials_path=None):
         """

@@ -203,6 +203,22 @@ class SupabasePortfolioSync:
         except Exception as e:
             print(f"Error getting stats: {str(e)}")
             return None
+    
+    def list_portfolio_names(self):
+        """
+        Get list of all portfolio names from Supabase
+        
+        Returns:
+            list: List of portfolio names, or empty list if error
+        """
+        try:
+            result = self.client.table('portfolios').select('name', 'updated_at').order('updated_at', desc=True).execute()
+            if result.data:
+                return [row['name'] for row in result.data]
+            return []
+        except Exception as e:
+            print(f"Error listing portfolios: {str(e)}")
+            return []
 
 
 def setup_supabase_sync(url: str = None, key: str = None) -> Optional[SupabasePortfolioSync]:
