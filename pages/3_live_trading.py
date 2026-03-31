@@ -178,30 +178,21 @@ with tab1:
     col1, col2 = st.columns(2)
     
     with col1:
-        supabase_url = st.text_input(
-            "Supabase URL",
-            value=os.getenv('SUPABASE_URL', ''),
-            help="Your Supabase project URL",
-            key="supabase_url",
-            type="password"
-        )
-        supabase_key = st.text_input(
-            "Supabase Key",
-            value=os.getenv('SUPABASE_KEY', ''),
-            help="Your Supabase API key",
-            key="supabase_key",
-            type="password"
-        )
+        # Check if credentials are configured
+        supabase_url = os.getenv('SUPABASE_URL', '')
+        supabase_key = os.getenv('SUPABASE_KEY', '')
+        
+        if supabase_url and supabase_key:
+            st.info("✅ Credentials configured (.env file)")
+        else:
+            st.warning("⚠️ Credentials not found")
+            st.caption("Set SUPABASE_URL and SUPABASE_KEY in .env file")
     
     with col2:
         # Try to get existing portfolio names
         existing_portfolios = []
         try:
             from core.supabase_sync import setup_supabase_sync
-            if supabase_url:
-                os.environ['SUPABASE_URL'] = supabase_url
-            if supabase_key:
-                os.environ['SUPABASE_KEY'] = supabase_key
             sync = setup_supabase_sync()
             if sync:
                 existing_portfolios = sync.list_portfolio_names()
@@ -241,19 +232,13 @@ with tab1:
             with st.spinner("Loading from Supabase..."):
                 error_occurred = False
                 try:
-                    # Temporarily set env vars if provided
-                    if supabase_url:
-                        os.environ['SUPABASE_URL'] = supabase_url
-                    if supabase_key:
-                        os.environ['SUPABASE_KEY'] = supabase_key
-                    
                     # First check if the connection works
                     from core.supabase_sync import setup_supabase_sync
                     sync = setup_supabase_sync()
                     
                     if not sync:
                         st.error("❌ Failed to connect to Supabase. Check your credentials.")
-                        st.info("💡 Make sure SUPABASE_URL and SUPABASE_KEY are set in .env or entered above.")
+                        st.info("💡 Make sure SUPABASE_URL and SUPABASE_KEY are set in .env file")
                         error_occurred = True
                     else:
                         # Try to load raw data first to see what's happening
@@ -317,12 +302,6 @@ with tab1:
             if st.button("☁️ Sync to Cloud", help="Save portfolio to Supabase"):
                 with st.spinner("Syncing to Supabase..."):
                     try:
-                        # Temporarily set env vars if provided
-                        if supabase_url:
-                            os.environ['SUPABASE_URL'] = supabase_url
-                        if supabase_key:
-                            os.environ['SUPABASE_KEY'] = supabase_key
-                        
                         portfolio = st.session_state['portfolio']
                         
                         # Prepare agent config
@@ -341,7 +320,7 @@ with tab1:
                             st.error(f"❌ Sync failed: {result}")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
-                        st.info("💡 Make sure you have SUPABASE_URL and SUPABASE_KEY set. See setup instructions below.")
+                        st.info("💡 Make sure you have SUPABASE_URL and SUPABASE_KEY set in .env file. See setup instructions below.")
     
     # Show success message after reload (if we just loaded)
     if 'load_success' in st.session_state:
@@ -430,13 +409,14 @@ with tab1:
         
         4. Click "Run" to create the tables
         
-        **Step 5: Use Your Credentials**
-        - Either paste them in the fields above, OR
-        - Create a `.env` file in your project folder with:
+        **Step 5: Configure Your Credentials**
+        - Create a `.env` file in your project root folder:
         ```
         SUPABASE_URL=your_project_url_here
         SUPABASE_KEY=your_anon_key_here
         ```
+        - Replace with your actual credentials from Step 3
+        - 🔒 **Security**: Credentials are read from .env and never displayed in the UI
         
         ---
         
