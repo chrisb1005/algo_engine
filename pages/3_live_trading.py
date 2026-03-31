@@ -171,72 +171,149 @@ with tab1:
             st.warning("Agent stopped")
             st.rerun()
     
-    # Supabase cloud sync section
-    if st.session_state['portfolio']:
-        st.markdown("---")
-        st.markdown("**☁️ Supabase Cloud Sync**")
+    # Supabase cloud sync section (always visible)
+    st.markdown("---")
+    st.markdown("**☁️ Supabase Cloud Sync**")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        supabase_url = st.text_input(
+            "Supabase URL",
+            value=os.getenv('SUPABASE_URL', ''),
+            help="Your Supabase project URL",
+            key="supabase_url",
+            type="password"
+        )
+        supabase_key = st.text_input(
+            "Supabase Key",
+            value=os.getenv('SUPABASE_KEY', ''),
+            help="Your Supabase API key",
+            key="supabase_key",
+            type="password"
+        )
+    
+    with col2:
+        # Try to get existing portfolio names
+        existing_portfolios = []
+        try:
+            from core.supabase_sync import setup_supabase_sync
+            if supabase_url:
+                os.environ['SUPABASE_URL'] = supabase_url
+            if supabase_key:
+                os.environ['SUPABASE_KEY'] = supabase_key
+            sync = setup_supabase_sync()
+            if sync:
+                existing_portfolios = sync.list_portfolio_names()
+        except Exception:
+            pass  # If error, just show empty list
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            supabase_url = st.text_input(
-                "Supabase URL",
-                value=os.getenv('SUPABASE_URL', ''),
-                help="Your Supabase project URL",
-                key="supabase_url",
-                type="password"
+        # Portfolio selection/creation
+        if existing_portfolios:
+            portfolio_options = existing_portfolios + ["➕ Create New Portfolio"]
+            selected_option = st.selectbox(
+                "Select Portfolio",
+                options=portfolio_options,
+                help="Choose existing portfolio or create new",
+                key="portfolio_selector"
             )
-            supabase_key = st.text_input(
-                "Supabase Key",
-                value=os.getenv('SUPABASE_KEY', ''),
-                help="Your Supabase API key",
-                key="supabase_key",
-                type="password"
-            )
-        
-        with col2:
-            # Try to get existing portfolio names
-            existing_portfolios = []
-            try:
-                from core.supabase_sync import setup_supabase_sync
-                if supabase_url:
-                    os.environ['SUPABASE_URL'] = supabase_url
-                if supabase_key:
-                    os.environ['SUPABASE_KEY'] = supabase_key
-                sync = setup_supabase_sync()
-                if sync:
-                    existing_portfolios = sync.list_portfolio_names()
-            except Exception:
-                pass  # If error, just show empty list
             
-            # Portfolio selection/creation
-            if existing_portfolios:
-                portfolio_options = existing_portfolios + ["➕ Create New Portfolio"]
-                selected_option = st.selectbox(
-                    "Select Portfolio",
-                    options=portfolio_options,
-                    help="Choose existing portfolio or create new",
-                    key="portfolio_selector"
-                )
-                
-                if selected_option == "➕ Create New Portfolio":
-                    portfolio_name = st.text_input(
-                        "New Portfolio Name",
-                        value="",
-                        placeholder="Enter unique name",
-                        help="Unique name for this portfolio",
-                        key="new_portfolio_name"
-                    )
-                else:
-                    portfolio_name = selected_option
-            else:
+            if selected_option == "➕ Create New Portfolio":
                 portfolio_name = st.text_input(
-                    "Portfolio Name",
-                    value="default",
+                    "New Portfolio Name",
+                    value="",
+                    placeholder="Enter unique name",
                     help="Unique name for this portfolio",
-                    key="portfolio_name"
+                    key="new_portfolio_name"
                 )
-            
+            else:
+                portfolio_name = selected_option
+        else:
+            portfolio_name = st.text_input(
+                "Portfolio Name",
+                value="default",
+                help="Unique name for this portfolio",
+                key="portfolio_name"
+            )
+        
+        # Load from Cloud - always available
+        if st.button("📥 Load from Cloud", help="Load portfolio from Supabase"):
+            with st.spinner("Loading from Supabase..."):
+                error_occurred = False
+                try:
+                    # Temporarily set env vars if provided
+                    if supabase_url:
+                        os.environ['SUPABASE_URL'] = supabase_url
+                    if supabase_key:
+                        os.environ['SUPABASE_KEY'] = supabase_key
+                    
+                    # First check if the connection works
+                    from core.supabase_sync import setup_supabase_sync
+                    sync = setup_supabase_sync()
+                    
+                    if not sync:
+                        st.error("❌ Failed to connect to Supabase. Check your credentials.")
+                        st.info("💡 Make sure SUPABASE_URL and SUPABASE_KEY are set in .env or entered above.")
+                        error_occurred = True
+                    else:
+                        # Try to load raw data first to see what's happening
+                        data = sync.load_portfolio(portfolio_name)
+                        
+                        if not data:
+                            st.warning(f"⚠️ No portfolio found with name '{portfolio_name}' in Supabase")
+                            st.info("💡 Make sure you've saved a portfolio with 'Sync to Cloud' first.")
+                            error_occurred = True
+                        else:
+                            # Now try to reconstruct the portfolio (will raise exception if fails)
+                            from core.paper_trader import PaperTradingPortfolio
+                            from core.auto_agent import AutoTradingAgent
+                            
+                            loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
+                            st.session_state['portfolio'] = loaded_portfolio
+                            
+                            # Get agent config from portfolio data
+                            if data['portfolio'].get('agent_config'):
+                                import json
+                                agent_config = json.loads(data['portfolio']['agent_config'])
+                                
+                                # Recreate agent with saved config
+                                tickers = agent_config.get('tickers', [])
+                                check_interval = agent_config.get('check_interval', 300)
+                                position_size = agent_config.get('position_size', 1)
+                                
+                                if tickers:
+                                    agent = AutoTradingAgent(
+                                        portfolio=loaded_portfolio,
+                                        tickers=tickers,
+                                        check_interval=check_interval,
+                                        position_size=position_size,
+                                        save_callback=None
+                                    )
+                                    
+                                    st.session_state['agent'] = agent
+                                    st.session_state['tickers'] = tickers
+                                    st.session_state['check_interval'] = check_interval
+                            
+                            # Set success flag to show message after rerun
+                            st.session_state['load_success'] = {
+                                'portfolio_name': portfolio_name,
+                                'portfolio_value': loaded_portfolio.get_portfolio_value(),
+                                'open_positions': len(loaded_portfolio.get_open_positions())
+                            }
+                
+                except Exception as e:
+                    st.error(f"❌ Error loading from Supabase: {str(e)}")
+                    import traceback
+                    st.code(traceback.format_exc(), language="python")
+                    st.info("💡 Common fixes:\n- Run the migration SQL if agent_config column is missing\n- Check that your Supabase credentials are correct\n- Verify the portfolio name matches what you saved")
+                    error_occurred = True
+                
+                # Only rerun if no error occurred and we successfully loaded
+                if not error_occurred:
+                    st.rerun()
+        
+        # Sync to Cloud - only show if portfolio exists
+        if st.session_state['portfolio']:
             if st.button("☁️ Sync to Cloud", help="Save portfolio to Supabase"):
                 with st.spinner("Syncing to Supabase..."):
                     try:
@@ -265,206 +342,131 @@ with tab1:
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
                         st.info("💡 Make sure you have SUPABASE_URL and SUPABASE_KEY set. See setup instructions below.")
-            
-            if st.button("📥 Load from Cloud", help="Load portfolio from Supabase"):
-                with st.spinner("Loading from Supabase..."):
-                    error_occurred = False
-                    try:
-                        # Temporarily set env vars if provided
-                        if supabase_url:
-                            os.environ['SUPABASE_URL'] = supabase_url
-                        if supabase_key:
-                            os.environ['SUPABASE_KEY'] = supabase_key
-                        
-                        # First check if the connection works
-                        from core.supabase_sync import setup_supabase_sync
-                        sync = setup_supabase_sync()
-                        
-                        if not sync:
-                            st.error("❌ Failed to connect to Supabase. Check your credentials.")
-                            st.info("💡 Make sure SUPABASE_URL and SUPABASE_KEY are set in .env or entered above.")
-                            error_occurred = True
-                        else:
-                            # Try to load raw data first to see what's happening
-                            data = sync.load_portfolio(portfolio_name)
-                            
-                            if not data:
-                                st.warning(f"⚠️ No portfolio found with name '{portfolio_name}' in Supabase")
-                                st.info("💡 Make sure you've saved a portfolio with 'Sync to Cloud' first.")
-                                error_occurred = True
-                            else:
-                                # Now try to reconstruct the portfolio (will raise exception if fails)
-                                from core.paper_trader import PaperTradingPortfolio
-                                from core.auto_agent import AutoTradingAgent
-                                
-                                loaded_portfolio = PaperTradingPortfolio.load_from_supabase(portfolio_name)
-                                st.session_state['portfolio'] = loaded_portfolio
-                                
-                                # Get agent config from portfolio data
-                                if data['portfolio'].get('agent_config'):
-                                    import json
-                                    agent_config = json.loads(data['portfolio']['agent_config'])
-                                    
-                                    # Recreate agent with saved config
-                                    tickers = agent_config.get('tickers', [])
-                                    check_interval = agent_config.get('check_interval', 300)
-                                    position_size = agent_config.get('position_size', 1)
-                                    
-                                    if tickers:
-                                        agent = AutoTradingAgent(
-                                            portfolio=loaded_portfolio,
-                                            tickers=tickers,
-                                            check_interval=check_interval,
-                                            position_size=position_size,
-                                            save_callback=None
-                                        )
-                                        
-                                        st.session_state['agent'] = agent
-                                        st.session_state['tickers'] = tickers
-                                        st.session_state['check_interval'] = check_interval
-                                
-                                # Set success flag to show message after rerun
-                                st.session_state['load_success'] = {
-                                    'portfolio_name': portfolio_name,
-                                    'portfolio_value': loaded_portfolio.get_portfolio_value(),
-                                    'open_positions': len(loaded_portfolio.get_open_positions())
-                                }
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error loading from Supabase: {str(e)}")
-                        import traceback
-                        st.code(traceback.format_exc(), language="python")
-                        st.info("💡 Common fixes:\n- Run the migration SQL if agent_config column is missing\n- Check that your Supabase credentials are correct\n- Verify the portfolio name matches what you saved")
-                        error_occurred = True
-                    
-                    # Only rerun if no error occurred and we successfully loaded
-                    if not error_occurred:
-                        st.rerun()
-            
-            # Show success message after reload (if we just loaded)
-            if 'load_success' in st.session_state:
-                success_data = st.session_state['load_success']
-                st.success(f"✅ Loaded portfolio '{success_data['portfolio_name']}' from Supabase!")
-                st.info(f"📊 Portfolio Value: ${success_data['portfolio_value']:,.2f} | Open Positions: {success_data['open_positions']}")
-                del st.session_state['load_success']  # Clear the flag
+    
+    # Show success message after reload (if we just loaded)
+    if 'load_success' in st.session_state:
+        success_data = st.session_state['load_success']
+        st.success(f"✅ Loaded portfolio '{success_data['portfolio_name']}' from Supabase!")
+        st.info(f"📊 Portfolio Value: ${success_data['portfolio_value']:,.2f} | Open Positions: {success_data['open_positions']}")
+        del st.session_state['load_success']  # Clear the flag
+    
+    # Setup instructions expander
+    with st.expander("📖 Supabase Setup Instructions (Free - 2 minutes)"):
+        st.markdown("""
+        **Step 1: Create Free Supabase Account**
+        1. Go to [supabase.com](https://supabase.com/)
+        2. Click "Start your project"
+        3. Sign in with GitHub (or email)
         
-        # Setup instructions expander
-        with st.expander("📖 Supabase Setup Instructions (Free - 2 minutes)"):
-            st.markdown("""
-            **Step 1: Create Free Supabase Account**
-            1. Go to [supabase.com](https://supabase.com/)
-            2. Click "Start your project"
-            3. Sign in with GitHub (or email)
-            
-            **Step 2: Create New Project**
-            1. Click "New Project"
-            2. Choose organization (or create one)
-            3. Enter project name (e.g., "algo-trader")
-            4. Create a strong database password
-            5. Choose region closest to you
-            6. Click "Create new project" (wait ~2 minutes for setup)
-            
-            **Step 3: Get Your Credentials**
-            1. Go to Project Settings (gear icon) > API
-            2. Find "Project URL" - copy this
-            3. Find "anon public" key under "Project API keys" - copy this
-            
-            **Step 4: Create Tables (Run SQL)**
-            1. Go to SQL Editor (left sidebar)
-            2. Click "New Query"
-            3. Paste this SQL:
-            
-            ```sql
-            -- Portfolios table
-            CREATE TABLE IF NOT EXISTS portfolios (
-                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                starting_cash NUMERIC NOT NULL,
-                current_cash NUMERIC NOT NULL,
-                max_position_size NUMERIC NOT NULL,
-                max_positions INTEGER NOT NULL,
-                agent_config TEXT,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            
-            -- Positions table
-            CREATE TABLE IF NOT EXISTS positions (
-                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
-                ticker TEXT NOT NULL,
-                option_type TEXT NOT NULL,
-                strike NUMERIC NOT NULL,
-                expiration TIMESTAMP WITH TIME ZONE NOT NULL,
-                quantity INTEGER NOT NULL,
-                entry_price NUMERIC NOT NULL,
-                entry_date TIMESTAMP WITH TIME ZONE NOT NULL,
-                exit_price NUMERIC,
-                exit_date TIMESTAMP WITH TIME ZONE,
-                status TEXT NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            
-            -- Trades table
-            CREATE TABLE IF NOT EXISTS trades (
-                id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-                portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
-                date TIMESTAMP WITH TIME ZONE NOT NULL,
-                ticker TEXT,
-                action TEXT,
-                option_type TEXT,
-                strike NUMERIC,
-                quantity INTEGER,
-                price NUMERIC,
-                cost NUMERIC,
-                pnl NUMERIC,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-            
-            -- Create indexes for better performance
-            CREATE INDEX IF NOT EXISTS idx_positions_portfolio ON positions(portfolio_id);
-            CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades(portfolio_id);
-            ```
-            
-            4. Click "Run" to create the tables
-            
-            **Step 5: Use Your Credentials**
-            - Either paste them in the fields above, OR
-            - Create a `.env` file in your project folder with:
-            ```
-            SUPABASE_URL=your_project_url_here
-            SUPABASE_KEY=your_anon_key_here
-            ```
-            
-            ---
-            
-            **⚠️ IMPORTANT: If you created tables before, run this migration:**
-            
-            If you already created the tables earlier (before agent_config was added), go to SQL Editor and run:
-            
-            ```sql
-            ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS agent_config TEXT;
-            ```
-            
-            This adds support for saving your agent configuration (tickers, check interval, etc.) to the cloud.
-            
-            ---
-            
-            **That's it!** Click "☁️ Sync to Cloud" to save your portfolio. It's free up to 500MB!
-            
-            **Benefits over Google Sheets:**
-            - ✅ No JSON credentials needed
-            - ✅ Faster (real database vs spreadsheet)
-            - ✅ More secure
-            - ✅ Better for trading data
-            - ✅ 2-minute setup vs 15 minutes
-            """)
+        **Step 2: Create New Project**
+        1. Click "New Project"
+        2. Choose organization (or create one)
+        3. Enter project name (e.g., "algo-trader")
+        4. Create a strong database password
+        5. Choose region closest to you
+        6. Click "Create new project" (wait ~2 minutes for setup)
         
-        # Current status
-        st.markdown("---")
-        status_text = '🟢 RUNNING' if st.session_state['agent_running'] else '🔴 STOPPED'
-        tickers_str = ', '.join(st.session_state.get('tickers', []))
-        st.info(f"📊 Portfolio Active | Monitoring: {tickers_str} | Status: {status_text}")
+        **Step 3: Get Your Credentials**
+        1. Go to Project Settings (gear icon) > API
+        2. Find "Project URL" - copy this
+        3. Find "anon public" key under "Project API keys" - copy this
+        
+        **Step 4: Create Tables (Run SQL)**
+        1. Go to SQL Editor (left sidebar)
+        2. Click "New Query"
+        3. Paste this SQL:
+        
+        ```sql
+        -- Portfolios table
+        CREATE TABLE IF NOT EXISTS portfolios (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            starting_cash NUMERIC NOT NULL,
+            current_cash NUMERIC NOT NULL,
+            max_position_size NUMERIC NOT NULL,
+            max_positions INTEGER NOT NULL,
+            agent_config TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        -- Positions table
+        CREATE TABLE IF NOT EXISTS positions (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
+            ticker TEXT NOT NULL,
+            option_type TEXT NOT NULL,
+            strike NUMERIC NOT NULL,
+            expiration TIMESTAMP WITH TIME ZONE NOT NULL,
+            quantity INTEGER NOT NULL,
+            entry_price NUMERIC NOT NULL,
+            entry_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            exit_price NUMERIC,
+            exit_date TIMESTAMP WITH TIME ZONE,
+            status TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        -- Trades table
+        CREATE TABLE IF NOT EXISTS trades (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            portfolio_id UUID REFERENCES portfolios(id) ON DELETE CASCADE,
+            date TIMESTAMP WITH TIME ZONE NOT NULL,
+            ticker TEXT,
+            action TEXT,
+            option_type TEXT,
+            strike NUMERIC,
+            quantity INTEGER,
+            price NUMERIC,
+            cost NUMERIC,
+            pnl NUMERIC,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        -- Create indexes for better performance
+        CREATE INDEX IF NOT EXISTS idx_positions_portfolio ON positions(portfolio_id);
+        CREATE INDEX IF NOT EXISTS idx_trades_portfolio ON trades(portfolio_id);
+        ```
+        
+        4. Click "Run" to create the tables
+        
+        **Step 5: Use Your Credentials**
+        - Either paste them in the fields above, OR
+        - Create a `.env` file in your project folder with:
+        ```
+        SUPABASE_URL=your_project_url_here
+        SUPABASE_KEY=your_anon_key_here
+        ```
+        
+        ---
+        
+        **⚠️ IMPORTANT: If you created tables before, run this migration:**
+        
+        If you already created the tables earlier (before agent_config was added), go to SQL Editor and run:
+        
+        ```sql
+        ALTER TABLE portfolios ADD COLUMN IF NOT EXISTS agent_config TEXT;
+        ```
+        
+        This adds support for saving your agent configuration (tickers, check interval, etc.) to the cloud.
+        
+        ---
+        
+        **That's it!** Click "☁️ Sync to Cloud" to save your portfolio. It's free up to 500MB!
+        
+        **Benefits over Google Sheets:**
+        - ✅ No JSON credentials needed
+        - ✅ Faster (real database vs spreadsheet)
+        - ✅ More secure
+        - ✅ Better for trading data
+        - ✅ 2-minute setup vs 15 minutes
+        """)
+    
+    # Current status
+    st.markdown("---")
+    status_text = '🟢 RUNNING' if st.session_state['agent_running'] else '🔴 STOPPED'
+    tickers_str = ', '.join(st.session_state.get('tickers', []))
+    st.info(f"📊 Portfolio Active | Monitoring: {tickers_str} | Status: {status_text}")
 
 # ----- TAB 2: PORTFOLIO -----
 with tab2:
