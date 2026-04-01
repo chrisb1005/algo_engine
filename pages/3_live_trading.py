@@ -171,6 +171,41 @@ with tab1:
             st.warning("Agent stopped")
             st.rerun()
     
+    # Cloud Agent Info
+    st.markdown("---")
+    st.markdown("### ☁️ Cloud Agent (Recommended)")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.info("""
+        **🚀 Run your agent 24/7 in the cloud!**
+        
+        The browser agent above only works when this page is open. For true autonomous trading:
+        
+        1. Sync your portfolio to cloud (button below)
+        2. Deploy `agent_service.py` to Railway, Render, or run locally as background process
+        3. Your agent runs continuously, executing trades 24/7
+        4. View live trades here in real-time from the cloud
+        
+        See `CLOUD_DEPLOYMENT.md` for full instructions.
+        """)
+    
+    with col2:
+        # Check if portfolio has been synced recently
+        if st.session_state['portfolio']:
+            st.success("✅ Portfolio configured")
+            st.caption("Ready for cloud deployment")
+        else:
+            st.warning("⚠️ Create portfolio first")
+        
+        if st.button("📖 View Deployment Guide"):
+            st.markdown("See the `CLOUD_DEPLOYMENT.md` file in your project folder for detailed instructions on:")
+            st.markdown("- Running locally as background process")
+            st.markdown("- Deploying to Railway (free tier)")
+            st.markdown("- Deploying to Render (free tier)")
+            st.markdown("- Deploying to Heroku")
+            st.markdown("- AWS/Google Cloud options")
+    
     # Supabase cloud sync section (always visible)
     st.markdown("---")
     st.markdown("**☁️ Supabase Cloud Sync**")
@@ -642,17 +677,29 @@ with tab3:
 
 # ----- TAB 4: TRADE LOG -----
 with tab4:
+    # Add refresh controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        st.subheader("📜 Live Trade Log")
+    with col2:
+        auto_refresh = st.checkbox("🔄 Auto-refresh", value=False, help="Reload data every 10 seconds")
+    with col3:
+        if st.button("🔃 Refresh Now"):
+            st.rerun()
+    
+    # Info about cloud agent
+    if st.session_state['portfolio']:
+        st.info("💡 **Monitoring Mode**: This view shows real-time trades from Supabase. If you have a cloud agent running, trades will appear here automatically.")
+    
     if st.session_state['agent'] is None:
         st.info("👈 Create a portfolio in the Setup tab to get started")
     else:
         agent = st.session_state['agent']
         
-        st.subheader("📜 Agent Activity Log")
-        
-        # Run agent cycles if running
+        # Browser agent status (if running)
         if st.session_state['agent_running']:
             with st.container():
-                st.info("🤖 Agent is running... Checking signals automatically")
+                st.warning("⚠️ **Browser Agent Active** (only works while page is open)")
                 
                 # Show last cycle time
                 if agent.log:
@@ -678,3 +725,8 @@ with tab4:
                 with st.spinner("Running test cycle..."):
                     agent.run_cycle()
                     st.rerun()
+    
+    # Auto-refresh functionality
+    if auto_refresh:
+        time.sleep(10)  # Wait 10 seconds
+        st.rerun()
