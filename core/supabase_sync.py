@@ -70,7 +70,11 @@ class SupabasePortfolioSync:
             # Add agent config if provided
             if agent_config:
                 import json
-                portfolio_data['agent_config'] = json.dumps(agent_config)
+                agent_config_json = json.dumps(agent_config)
+                portfolio_data['agent_config'] = agent_config_json
+                print(f"💾 Saving agent_config: {agent_config_json}")
+            else:
+                print("⚠️  No agent_config provided - will be NULL in database")
             
             if existing.data:
                 # Update existing portfolio

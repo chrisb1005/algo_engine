@@ -140,7 +140,7 @@ with tab1:
                 st.session_state['check_interval'] = check_interval
                 
                 st.success(f"✅ Portfolio created with ${starting_cash:,.0f}")
-                st.info("💡 Use 'Sync to Cloud' below to save your portfolio to Supabase")
+                st.info("💡 Portfolio will be ready for cloud agent after you 'Sync to Cloud'")
                 
                 st.rerun()
     
@@ -292,27 +292,37 @@ with tab1:
                             st.session_state['portfolio'] = loaded_portfolio
                             
                             # Get agent config from portfolio data
-                            if data['portfolio'].get('agent_config'):
+                            agent_config_raw = data['portfolio'].get('agent_config')
+                            
+                            if agent_config_raw:
                                 import json
-                                agent_config = json.loads(data['portfolio']['agent_config'])
-                                
-                                # Recreate agent with saved config
-                                tickers = agent_config.get('tickers', [])
-                                check_interval = agent_config.get('check_interval', 300)
-                                position_size = agent_config.get('position_size', 1)
-                                
-                                if tickers:
-                                    agent = AutoTradingAgent(
-                                        portfolio=loaded_portfolio,
-                                        tickers=tickers,
-                                        check_interval=check_interval,
-                                        position_size=position_size,
-                                        save_callback=None
-                                    )
+                                try:
+                                    agent_config = json.loads(agent_config_raw)
                                     
-                                    st.session_state['agent'] = agent
-                                    st.session_state['tickers'] = tickers
-                                    st.session_state['check_interval'] = check_interval
+                                    # Recreate agent with saved config
+                                    tickers = agent_config.get('tickers', [])
+                                    check_interval = agent_config.get('check_interval', 300)
+                                    position_size = agent_config.get('position_size', 1)
+                                    
+                                    if tickers:
+                                        agent = AutoTradingAgent(
+                                            portfolio=loaded_portfolio,
+                                            tickers=tickers,
+                                            check_interval=check_interval,
+                                            position_size=position_size,
+                                            save_callback=None
+                                        )
+                                        
+                                        st.session_state['agent'] = agent
+                                        st.session_state['tickers'] = tickers
+                                        st.session_state['check_interval'] = check_interval
+                                        st.info(f"✅ Loaded agent config: {len(tickers)} ticker(s), {check_interval}s interval")
+                                    else:
+                                        st.warning("⚠️ Agent config found but no tickers - please update and sync again")
+                                except json.JSONDecodeError as e:
+                                    st.warning(f"⚠️ Failed to parse agent config: {str(e)}")
+                            else:
+                                st.warning("⚠️ No agent config found - portfolio will need to be synced with agent settings")
                             
                             # Set success flag to show message after rerun
                             st.session_state['load_success'] = {
@@ -334,25 +344,50 @@ with tab1:
         
         # Sync to Cloud - only show if portfolio exists
         if st.session_state['portfolio']:
+            # Show current config that will be synced
+            st.markdown("**📋 Current Configuration**")
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.caption(f"Tickers: {len(st.session_state.get('tickers', []))}")
+                if st.session_state.get('tickers'):
+                    st.caption(", ".join(st.session_state['tickers']))
+                else:
+                    st.warning("⚠️ No tickers configured!")
+            with col_b:
+                st.caption(f"Interval: {st.session_state.get('check_interval', 300)}s")
+            with col_c:
+                position_size = st.session_state['agent'].position_size if st.session_state.get('agent') else 1
+                st.caption(f"Position size: {position_size}")
+            
             if st.button("☁️ Sync to Cloud", help="Save portfolio to Supabase"):
                 with st.spinner("Syncing to Supabase..."):
                     try:
                         portfolio = st.session_state['portfolio']
                         
-                        # Prepare agent config
-                        agent_config = {
-                            'tickers': st.session_state.get('tickers', []),
-                            'check_interval': st.session_state.get('check_interval', 300),
-                            'position_size': st.session_state['agent'].position_size if st.session_state.get('agent') else 1
-                        }
-                        
-                        success, result = portfolio.save_to_supabase(portfolio_name, agent_config)
-                        
-                        if success:
-                            st.success(f"✅ Synced to Supabase!")
-                            st.info(f"💾 {result}")
+                        # Prepare agent config - ensure tickers list is not empty
+                        tickers = st.session_state.get('tickers', [])
+                        if not tickers:
+                            st.error("❌ Cannot sync without tickers! Please create/load portfolio with tickers first.")
+                            st.info("💡 Go to Setup tab and create a new portfolio OR load an existing one to get tickers.")
                         else:
-                            st.error(f"❌ Sync failed: {result}")
+                            # Build agent config
+                            agent_config = {
+                                'tickers': tickers,
+                                'check_interval': st.session_state.get('check_interval', 300),
+                                'position_size': st.session_state['agent'].position_size if st.session_state.get('agent') else 1
+                            }
+                            
+                            # Debug: show what we're syncing
+                            st.info(f"📤 Syncing config: {agent_config}")
+                            
+                            success, result = portfolio.save_to_supabase(portfolio_name, agent_config)
+                            
+                            if success:
+                                st.success(f"✅ Synced to Supabase!")
+                                st.info(f"💾 {result}")
+                                st.success(f"🤖 Cloud agent ready with {len(tickers)} ticker(s)")
+                            else:
+                                st.error(f"❌ Sync failed: {result}")
                     except Exception as e:
                         st.error(f"❌ Error: {str(e)}")
                         st.info("💡 Make sure you have SUPABASE_URL and SUPABASE_KEY set in .env file. See setup instructions below.")
@@ -509,6 +544,18 @@ with tab2:
         
         with col4:
             st.metric("Total Trades", stats['total_trades'])
+        
+        # Cloud agent readiness check
+        agent_config = {
+            'tickers': st.session_state.get('tickers', []),
+            'check_interval': st.session_state.get('check_interval', 300),
+            'position_size': st.session_state['agent'].position_size if st.session_state.get('agent') else 1
+        }
+        
+        if not st.session_state.get('tickers'):
+            st.warning("⚠️ **Cloud Agent Not Configured**: Add tickers in Setup tab and click 'Sync to Cloud' to enable autonomous trading")
+        else:
+            st.success(f"✅ **Cloud Agent Ready**: Monitoring {len(st.session_state.get('tickers', []))} ticker(s) • Check every {st.session_state.get('check_interval', 300)}s • Position size: {agent_config['position_size']} contract(s)")
         
         st.markdown("---")
         
