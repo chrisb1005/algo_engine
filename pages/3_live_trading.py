@@ -38,7 +38,7 @@ if 'check_interval' not in st.session_state:
     st.session_state['check_interval'] = 300
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["⚙️ Setup", "📊 Portfolio", "📈 Positions", "📜 Trade Log"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["⚙️ Setup", "📊 Portfolio", "📈 Positions", "📜 Trade Log", "📋 Cloud Agent Log"])
 
 # ----- TAB 1: SETUP -----
 with tab1:
@@ -776,4 +776,103 @@ with tab4:
     # Auto-refresh functionality
     if auto_refresh:
         time.sleep(10)  # Wait 10 seconds
+        st.rerun()
+
+# ----- TAB 5: CLOUD AGENT LOG -----
+with tab5:
+    # Add refresh controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        st.subheader("📋 Cloud Agent Service Log")
+    with col2:
+        auto_refresh_log = st.checkbox("🔄 Auto-refresh", value=False, help="Reload log every 5 seconds", key="auto_refresh_log")
+    with col3:
+        if st.button("🔃 Refresh Now", key="refresh_log"):
+            st.rerun()
+    
+    st.info("💡 **Real-time monitoring**: This shows the log from your cloud agent service (agent_service.py). If the agent is running, you'll see live updates here.")
+    
+    # Read and display the log file
+    log_file_path = Path("agent_service.log")
+    
+    if log_file_path.exists():
+        try:
+            with open(log_file_path, 'r') as f:
+                log_lines = f.readlines()
+            
+            if log_lines:
+                # Controls for how many lines to show
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    num_lines = st.selectbox("Show last:", [50, 100, 200, 500, "All"], index=1, key="num_log_lines")
+                
+                # Get the requested number of lines
+                if num_lines == "All":
+                    display_lines = log_lines
+                else:
+                    display_lines = log_lines[-int(num_lines):]
+                
+                log_text = "".join(display_lines)
+                
+                # Show log stats
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Lines", len(log_lines))
+                with col2:
+                    st.metric("Displaying", len(display_lines))
+                with col3:
+                    if log_lines:
+                        # Parse last timestamp from log
+                        last_line = log_lines[-1]
+                        if " - " in last_line:
+                            try:
+                                timestamp = last_line.split(" - ")[0]
+                                st.metric("Last Update", timestamp.split(",")[0])  # Date part
+                            except:
+                                st.metric("Last Update", "Recent")
+                        else:
+                            st.metric("Last Update", "Recent")
+                
+                # Display the log
+                st.text_area(
+                    "Log Output",
+                    value=log_text,
+                    height=500,
+                    disabled=True,
+                    help="Live log from agent_service.py - scroll down to see latest entries"
+                )
+                
+                # Highlight sections
+                with st.expander("ℹ️ Log Legend"):
+                    st.markdown("""
+                    - 🤖 **Agent Starting**: Initial startup messages
+                    - ⏱️ **Check interval**: How often the agent checks for trades
+                    - 🔍 **Analyzing**: Agent is analyzing a ticker
+                    - 📊 **Portfolio value**: Current portfolio status
+                    - ✅ **Action**: Trade executed or position closed
+                    - ⏳ **Sleeping**: Agent is waiting for next check
+                    - ❌ **Error**: Something went wrong (check details)
+                    """)
+                
+            else:
+                st.info("📄 Log file exists but is empty. Start the agent to see logs.")
+        
+        except Exception as e:
+            st.error(f"Error reading log file: {str(e)}")
+    else:
+        st.warning("📄 No log file found. The cloud agent hasn't been started yet.")
+        st.markdown("""
+        **To start the cloud agent:**
+        ```powershell
+        # With default check interval from Supabase
+        python agent_service.py your_portfolio_name
+        
+        # With custom check interval (30 seconds)
+        python agent_service.py your_portfolio_name 30
+        ```
+        """)
+    
+    # Auto-refresh functionality
+    if auto_refresh_log:
+        time.sleep(5)  # Wait 5 seconds for log refresh
         st.rerun()

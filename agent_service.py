@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 class CloudTradingAgent:
     """Autonomous trading agent that runs independently"""
     
-    def __init__(self, portfolio_name: str):
+    def __init__(self, portfolio_name: str, check_interval_override: int = None):
         self.portfolio_name = portfolio_name
         self.portfolio = None
         self.agent_config = None
         self.sync = None
         self.running = False
+        self.check_interval_override = check_interval_override
         
     def load_from_cloud(self):
         """Load portfolio and configuration from Supabase"""
@@ -177,7 +178,7 @@ class CloudTradingAgent:
                             continue
                         
                         # Check if we can open a new position
-                        open_count = len([p for p in self.portfolio.positions if p['status'] == 'open'])
+                        open_count = len([p for p in self.portfolio.positions if p.status == 'open'])
                         if open_count >= self.portfolio.max_positions:
                             logger.info(f"Max positions reached ({self.portfolio.max_positions}), skipping")
                             continue
@@ -311,9 +312,14 @@ class CloudTradingAgent:
             return
         
         self.running = True
-        check_interval = self.agent_config.get('check_interval', 300)  # Default 5 minutes
         
-        logger.info(f"⏱️  Check interval: {check_interval} seconds")
+        # Use CLI override if provided, otherwise use config from Supabase
+        if self.check_interval_override is not None:
+            check_interval = self.check_interval_override
+            logger.info(f"⏱️  Check interval: {check_interval} seconds (CLI override)")
+        else:
+            check_interval = self.agent_config.get('check_interval', 300)  # Default 5 minutes
+            logger.info(f"⏱️  Check interval: {check_interval} seconds")
         logger.info(f"📊 Tickers: {', '.join(self.agent_config.get('tickers', []))}")
         logger.info(f"💰 Position size: {self.agent_config.get('position_size', 1)} contracts")
         logger.info("🟢 Agent is now running...")
@@ -352,17 +358,27 @@ def main():
     # Load environment variables
     load_dotenv()
     
-    # Get portfolio name from environment or command line
+    # Get portfolio name and optional check interval from command line
     import sys
     if len(sys.argv) > 1:
         portfolio_name = sys.argv[1]
     else:
         portfolio_name = os.getenv('PORTFOLIO_NAME', 'default')
     
+    # Optional: override check interval from CLI (in seconds)
+    check_interval_override = None
+    if len(sys.argv) > 2:
+        try:
+            check_interval_override = int(sys.argv[2])
+            logger.info(f"Check interval override: {check_interval_override} seconds")
+        except ValueError:
+            logger.error(f"Invalid check interval: {sys.argv[2]}. Must be an integer.")
+            return
+    
     logger.info(f"Portfolio: {portfolio_name}")
     
     # Create and run agent
-    agent = CloudTradingAgent(portfolio_name)
+    agent = CloudTradingAgent(portfolio_name, check_interval_override)
     agent.run()
 
 
